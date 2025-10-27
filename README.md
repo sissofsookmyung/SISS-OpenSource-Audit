@@ -15,7 +15,7 @@
 ---
 
 ## 🏗️ 프로젝트 구조
-SISS-OpenSource-Audit/
+SISS-OpenSource-Audit/ <br>
 ├── README.md
 ├── bandit/
 │ └── docs/
