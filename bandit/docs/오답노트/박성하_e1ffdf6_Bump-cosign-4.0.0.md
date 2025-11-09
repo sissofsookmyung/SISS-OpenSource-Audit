@@ -17,7 +17,8 @@
 **취약점**
 
 - 공격자가 'sudoedit -- /etc/passwd'처럼 '--' 문자를 파일명과 함께 입력하면, 'sudo'의 argument parser가 '--'를 "여기서부터는 옵션이 아니라 파일명"이라는 뜻의 메타 문자로 잘못 해석함
-  **결과**
+
+**결과**
   - ’--’ 뒤에 오는 파일(예: /etc/passwd)은 ‘sudoedit'의 안전한 '임시 파일 복사' 로직을 우회하고, 편집할 파일 목록에 날것으로 추가되었음
 
   - 이로 인해 ‘sudoers' 정책상 편집 권한이 없는 사용자라도 ‘/etc/passwd’ 같은 민감한 시스템 파일을 ‘root’ 권한으로 직접 열어서 수정할 수 있게 되었음
@@ -30,9 +31,8 @@
 
 ## 3. 어떻게 해결? (Diff 분석)
 
-- **파일**: ‘**plugins/sudoers/parse.c’
+- **파일**: ‘plugins/sudoers/parse.c’
 
-````diff
 ``` diff
 --- a/plugins/sudoers/parse.c
 +++ b/plugins/sudoers/parse.c
