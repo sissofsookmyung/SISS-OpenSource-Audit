@@ -1,0 +1,81 @@
+### 개요
+
+- **분석 대상** : [**semgrep/*semgrep***](https://github.com/semgrep/semgrep)
+- **커밋 해시** : 5b889630a
+
+### 발견된 보안 문제
+
+Semgrep CLI는 규칙 설정을 가져오기 위해 `-f` , `-c`, `--config` 옵션에 URL을 입력 받음.
+
+Semgrep이 사용자가 입력한 URL로 HTTP요청을 보낼 때, **무조건 환경 변수에 있는 `SEMGREP_APP_TOKEN`을 인증 토큰으로 함께 실어 보냈음**
+
+- 취약점
+    
+    사용자가 공식 도메인이 아닌, 외부에서 호스팅되는 파일을 가져오기 위해 제 3자 서비스를 입력할 경우 **사용자 본인의 민감한 인증 토큰인 `SEMGREP_APP_TOKEN` 이 Semgrep과는 관련 없는 서버로 전송되어 토큰이 유출될 위험 존재**
+    
+
+⇒ Semgrep이 토큰을 너무 광범위하게 전송했기 때문에 제 3자에게 토큰을 유출할 수 있었음
+
+### 해결 방법(변경 내역)
+
+해당 파일 : config_resolver.py
+
+```bash
+semgrep/config_resolver.py
+diff --git a/cli/src/semgrep/config_resolver.py b/cli/src/semgrep/config_resolver.py
+index af17b1022..396aa9e94 100644
+--- a/cli/src/semgrep/config_resolver.py
++++ b/cli/src/semgrep/config_resolver.py
+@@ -86,8 +86,11 @@ class ConfigFile(NamedTuple):
+
+ class ConfigType(Enum):
++    # e.g p/<packname>, supply-chain, ...
+     REGISTRY = auto()
+     SEMGREP_CLOUD_PLATFORM = auto()
++    # 3rd party config sites (e.g https://mywebsite.com/rules.yaml)
++    REMOTE = auto()
+     LOCAL = auto()
+
+@@ -109,12 +112,18 @@ class ConfigLoader:
+         """
+         state = get_state()
+         self._project_url = project_url
+-        self._origin = ConfigType.REGISTRY
++        self._origin = ConfigType.REMOTE
+         self._supports_fallback_config = False
++
+         if config_str == "r2c":
++            # Hardcoded Registry rule pack
+             state.metrics.add_feature("config", "r2c")
++            state.metrics.is_using_registry = True
+             self._config_path = "https://semgrep.dev/c/p/r2c"
+:
+```
+
+초록 텍스트  : 규칙(Config)의 유형을 정의하는 `ConfigType` 열거형에 `REMOTE`가 추가됨
+
+- 변경 전 : 외부 URL을 공식 레지스트리와 같은 방식으로 처리
+- 변경 후 : 제 3자 URL에서 가져오는 설정 파일은 `ConfigType.REMOTE` 라는 새로운 유형으로 구분됨
+
+⇒ 토큰을 전송할지 말지 결정, REMOTE로 분류되면 다음 단계에서 함
+
+파랑 텍스트 : ConfigLoader 클래스의 `__init__` 메서드에서 설정의 출처를 초기화하는 방식이 변경됨
+
+- 변경 전 : 출처를 기본적으로 `ConfigType.REGISTRY` 로 설정했음
+- 변경 후 : 출처를 기본적으로 `ConfigType.REMOTE` 로 설정
+
+⇒ 규칙을 가져올 떄 기본적으로 외부 출처로 간주함. **기본적으로 토큰 전송을 막고, 확인된 경우에만 허용하는 보안 우선 접근 방식**으로 전환됨
+
+### 변경 요약
+
+| 구분 | 기존 로직 | 수정 로직 | 보안적 의미 |
+| --- | --- | --- | --- |
+| 토큰 유출 방지 | URL 출처를 기본적으로 `ConfigType.REGISTRY` 로 설정했음 | `SEMGREP_APP_TOKEN`을 사용자가 `-f`/`-c`/`--config` 옵션으로 전달한 규칙(config) URL로 전송할 때, 해당 URL이 **`semgrep.dev` 관련 URL이 아닌 경우**에는 토큰을 헤더에서 **제거 (필터링)** 하도록 로직이 추가됨 | **`semgrep.dev` 도메인으로 보내는 요청에만** 토큰이 포함되며, 신뢰할 수 없는 제3자 도메인으로 보내는 요청에서는 `Authorization: Bearer SEMGREP_APP_TOKEN` 헤더가 제외, 토큰 유출 위험을 방지 |
+
+### 결론
+
+이 패치는 사용자가 직접 규칙 파일을 가져오는 과정에서 **토큰이 오용되거나 노출되는 것을 방지**하는 **민감한 보안 패치**이며, 사용자가 의도하지 않은 토큰 전송을 막아주는 **보안 강화(Hardening)** 조치에 해당
+
+### 참고 자료
+
+- 릴리즈 노트 : [Release Release v1.138.0 · semgrep/semgrep](https://github.com/semgrep/semgrep/releases/tag/v1.138.0)
